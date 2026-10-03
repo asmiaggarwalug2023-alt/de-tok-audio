@@ -25,18 +25,18 @@ export default function SageFacts({mini=false}:{mini?:boolean}){
  const [fact,setFact]=useState<Fact|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');const seen=useRef<Set<string>|null>(null),queue=useRef<Fact[]>([]),cursor=useRef<string>('*'),clicks=useRef(0);
  async function next(){if(busy)return;setMessage('');if(!seen.current){try{seen.current=new Set(JSON.parse(localStorage.getItem(storage)||'[]'))}catch{seen.current=new Set()}}
  const unseen=sageFacts.filter(f=>!seen.current!.has(f.id));let chosen:Fact|undefined=unseen[Math.floor(Math.random()*unseen.length)];
- if(!chosen){setBusy(true);try{
+ if(!chosen){setBusy(true);setMessage('Sage is finding a new sourced science surprise…');try{
   if(cursor.current==='*'){try{cursor.current=localStorage.getItem('detok-fact-cursor')||'*'}catch{}}
-  for(let attempt=0;attempt<4&&!chosen;attempt++){
+  for(let attempt=0;attempt<3&&!chosen;attempt++){
    chosen=queue.current.find(f=>!seen.current!.has(f.id));if(chosen)break;
-   const checkNewest=clicks.current%5===0&&attempt===0;const mark=checkNewest?'*':cursor.current;
-   const r=await fetch('/api/facts?cursor='+encodeURIComponent(mark));if(!r.ok)throw Error();const d=await r.json() as {facts:Fact[];cursor:string|null};queue.current=d.facts;
-   if(!checkNewest||cursor.current==='*'){cursor.current=d.cursor||'*';try{localStorage.setItem('detok-fact-cursor',cursor.current)}catch{}}
+   const mark=cursor.current;
+   const r=await fetch('/api/facts?cursor='+encodeURIComponent(mark),{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const d=await r.json() as {facts:Fact[];cursor:string|null};queue.current=d.facts;
+   {cursor.current=d.cursor||'*';try{localStorage.setItem('detok-fact-cursor',cursor.current)}catch{}}
    chosen=queue.current.find(f=>!seen.current!.has(f.id));
   }
   clicks.current++;if(!chosen)setMessage('I’m looking for a new sourced finding. Tap again to continue through the research collection.');
  }catch{setMessage('Fresh research is temporarily unavailable. Your seen list is kept so I do not repeat old facts.')}finally{setBusy(false)}}
- if(chosen){seen.current!.add(chosen.id);setFact(chosen);try{localStorage.setItem(storage,JSON.stringify([...seen.current!]))}catch{}}
+ if(chosen){setMessage('');seen.current!.add(chosen.id);setFact(chosen);try{localStorage.setItem(storage,JSON.stringify([...seen.current!]))}catch{}}
  }
- return <div className={mini?'sage-facts sage-fact-mini':'sage-facts'}><button className="sage-fact-trigger" aria-label="Sage: tell me a new fun fact" aria-expanded={Boolean(fact)} disabled={busy} onClick={next}><img className={mini?'sage-mini':'sage-scientist'} src="/sage-lamb.png" alt="Sage, a fluffy lamb scientist holding a research board and magnifying glass" width={mini?70:1254} height={mini?70:1254}/></button>{!mini&&<p className="small">Tap Sage for a little science surprise ✳</p>}{fact&&<div className="fact-popup" aria-live="polite"><p className="eyebrow">{fact.kind||"SAGE’S LITTLE SCIENCE SURPRISE"}</p><p>{fact.text}</p>{fact.quote&&<><blockquote>{fact.quote}</blockquote><p className="small">Excerpt from the study’s conclusion · {fact.year}. One study is not the whole evidence picture.</p></>}<a href={fact.url} target="_blank" rel="noopener noreferrer">Follow the source ↗</a><button className="quiet" disabled={busy} onClick={next}>{busy?'Finding something new…':'Another fact'}</button><button className="quiet" onClick={()=>setFact(null)} aria-label="Close fun fact">Close</button></div>}{message&&<p className="small" role="status">{message}</p>}</div>;
+ return <div className={mini?'sage-facts sage-fact-mini':'sage-facts'}><button className="sage-fact-trigger" aria-label="Sage: tell me a new fun fact" aria-expanded={Boolean(fact)} disabled={busy} onClick={next}><img className={mini?'sage-mini':'sage-scientist'} src="/sage-lamb.png" alt="Sage, a fluffy lamb scientist holding a research board and magnifying glass" width={mini?70:1254} height={mini?70:1254}/></button>{!mini&&<p className="small">{busy?'Finding a fresh science surprise…':'Tap Sage for a little science surprise ✳'}</p>}{fact&&<div className="fact-popup" aria-live="polite"><p className="eyebrow">{fact.kind||"SAGE’S LITTLE SCIENCE SURPRISE"}</p><p>{fact.text}</p>{fact.quote&&<><blockquote>{fact.quote}</blockquote><p className="small">Excerpt from the study’s conclusion · {fact.year}. One study is not the whole evidence picture.</p></>}<a href={fact.url} target="_blank" rel="noopener noreferrer">Follow the source ↗</a><button className="quiet" disabled={busy} onClick={next}>{busy?'Finding something new…':'Another fact'}</button><button className="quiet" onClick={()=>setFact(null)} aria-label="Close fun fact">Close</button></div>}{message&&<p className="small" role="status">{message}</p>}</div>;
 }
