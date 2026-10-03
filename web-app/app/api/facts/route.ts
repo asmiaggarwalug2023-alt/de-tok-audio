@@ -1,0 +1,9 @@
+export async function GET(request:Request){
+ const cursor=new URL(request.url).searchParams.get('cursor')||'*';if(cursor.length>2000)return Response.json({error:'Invalid research cursor.'},{status:400});
+ try{const url=new URL('https://www.ebi.ac.uk/europepmc/webservices/rest/search');url.searchParams.set('query','SRC:MED AND HAS_ABSTRACT:Y AND (sleep OR nutrition OR exercise OR neuroscience OR mental health OR wellbeing) sort_date:y');url.searchParams.set('format','json');url.searchParams.set('resultType','core');url.searchParams.set('pageSize','20');url.searchParams.set('cursorMark',cursor);
+ const r=await fetch(url,{signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error();const data=await r.json() as {nextCursorMark?:string;resultList:{result:Record<string,unknown>[]}};
+ const clean=(s:unknown)=>typeof s==='string'?s.replace(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi,'$1: ').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim():'';
+ const facts=data.resultList.result.flatMap(p=>{const abstract=clean(p.abstractText),title=clean(p.title),id=String(p.id||'');const conclusion=abstract.match(/\b(?:conclusions?|interpretation)\s*[:.]\s*(.+)$/i)?.[1];if(!id||!title||!conclusion||/^retraction|^correction/i.test(title))return [];const words=conclusion.split(/\s+/);const quote=words.slice(0,45).join(' ')+(words.length>45?'…':'');return [{id:'pmid:'+id,text:'A new research nugget: '+title,quote,url:'https://pubmed.ncbi.nlm.nih.gov/'+encodeURIComponent(id)+'/',year:clean(p.pubYear),kind:'Study finding, not an established fact'}]});
+ return Response.json({facts,cursor:data.nextCursorMark||null,source:'Europe PMC / PubMed abstracts',checkedAt:new Date().toISOString()},{headers:{'Cache-Control':'public, max-age=900'}});
+ }catch{return Response.json({error:'New research is temporarily unavailable. Try Sage again shortly.'},{status:503})}
+}

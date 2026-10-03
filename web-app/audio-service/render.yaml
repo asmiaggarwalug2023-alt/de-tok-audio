@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: de-tok-audio
+    runtime: docker
+    plan: free
+    rootDir: audio-service
+    healthCheckPath: /health
+    envVars:
+      - key: EXTRACTOR_TOKEN
+        generateValue: true
