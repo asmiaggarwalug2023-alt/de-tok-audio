@@ -1,5 +1,6 @@
 'use client';
-import {useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
+import {fetchFactPage,type Fact} from './sage-fact-client';
 const sleep='https://medlineplus.gov/healthysleep.html',clock='https://www.nigms.nih.gov/education/fact-sheets/Pages/circadian-rhythms',dna='https://www.genome.gov/about-genomics/fact-sheets/Deoxyribonucleic-Acid-Fact-Sheet';
 export const sageFacts=[
  ['sleep-stages','Your brain has a night-time itinerary. Sleep cycles through REM and non-REM stages, rather than one long “off” mode.',sleep],
@@ -19,24 +20,19 @@ export const sageFacts=[
  ['biotin','Biotin is a vitamin, not a hair-specific ingredient. It helps enzymes involved in processing fats, sugars and amino acids.','https://ods.od.nih.gov/factsheets/Biotin-HealthProfessional/'],
  ['forgetting','In a mouse study, scientists linked certain neurons active during REM sleep to forgetting. Sleep research asks what we let go of as well as what we remember.','https://www.nih.gov/news-events/nih-research-matters/rem-sleep-may-help-brain-forget']
 ].map(([id,text,url])=>({id,text,url}));
-type Fact={id:string;text:string;url:string;quote?:string;year?:string;kind?:string};
-const storage='detok-sage-facts-v1';
+const storage='detok-sage-facts-v1',queueStorage='detok-sage-fact-queue-v2',cursorStorage='detok-fact-cursor';
 export default function SageFacts({mini=false}:{mini?:boolean}){
- const [fact,setFact]=useState<Fact|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');const seen=useRef<Set<string>|null>(null),queue=useRef<Fact[]>([]),cursor=useRef<string>('*'),clicks=useRef(0);
- async function next(){if(busy)return;setMessage('');if(!seen.current){try{seen.current=new Set(JSON.parse(localStorage.getItem(storage)||'[]'))}catch{seen.current=new Set()}}
- const unseen=sageFacts.filter(f=>!seen.current!.has(f.id));let chosen:Fact|undefined=unseen[Math.floor(Math.random()*unseen.length)];
- if(!chosen){setBusy(true);setMessage('Sage is finding a new sourced science surprise…');try{
-  if(cursor.current==='*'){try{cursor.current=localStorage.getItem('detok-fact-cursor')||'*'}catch{}}
-  for(let attempt=0;attempt<3&&!chosen;attempt++){
-   chosen=queue.current.find(f=>!seen.current!.has(f.id));if(chosen)break;
-   const mark=cursor.current;
-   const r=await fetch('/api/facts?cursor='+encodeURIComponent(mark),{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const d=await r.json() as {facts:Fact[];cursor:string|null};queue.current=d.facts;
-   {cursor.current=d.cursor||'*';try{localStorage.setItem('detok-fact-cursor',cursor.current)}catch{}}
-   chosen=queue.current.find(f=>!seen.current!.has(f.id));
-  }
-  clicks.current++;if(!chosen)setMessage('I’m looking for a new sourced finding. Tap again to continue through the research collection.');
- }catch{setMessage('Fresh research is temporarily unavailable. Your seen list is kept so I do not repeat old facts.')}finally{setBusy(false)}}
- if(chosen){setMessage('');seen.current!.add(chosen.id);setFact(chosen);try{localStorage.setItem(storage,JSON.stringify([...seen.current!]))}catch{}}
+ const [fact,setFact]=useState<Fact|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+ const seen=useRef<Set<string>>(new Set()),queue=useRef<Fact[]>([]),cursor=useRef('*'),ready=useRef(false),loading=useRef<Promise<void>|null>(null),clicking=useRef(false);
+ function restore(){if(ready.current)return;ready.current=true;try{const ids=JSON.parse(localStorage.getItem(storage)||'[]');if(Array.isArray(ids))seen.current=new Set(ids.filter(id=>typeof id==='string'));const saved=JSON.parse(localStorage.getItem(queueStorage)||'[]');if(Array.isArray(saved))queue.current=saved.filter(f=>f&&typeof f.id==='string'&&typeof f.text==='string'&&typeof f.url==='string'&&!seen.current.has(f.id));cursor.current=localStorage.getItem(cursorStorage)||'*'}catch{}}
+ function persist(){try{localStorage.setItem(storage,JSON.stringify([...seen.current]));localStorage.setItem(queueStorage,JSON.stringify(queue.current));localStorage.setItem(cursorStorage,cursor.current)}catch{}}
+ function refill(){if(loading.current)return loading.current;loading.current=(async()=>{const page=await fetchFactPage(cursor.current);queue.current=[...queue.current,...page.facts.filter(f=>!seen.current.has(f.id)&&!queue.current.some(q=>q.id===f.id))];cursor.current=page.cursor||'*';persist()})().finally(()=>{loading.current=null});return loading.current}
+ useEffect(()=>{restore();if(queue.current.length<3)void refill().catch(()=>{});},[]);
+ async function next(){if(clicking.current)return;clicking.current=true;restore();setMessage('');
+ const unseen=sageFacts.filter(f=>!seen.current.has(f.id));let chosen:Fact|undefined=unseen[Math.floor(Math.random()*unseen.length)]||queue.current.find(f=>!seen.current.has(f.id));
+ if(!chosen){setBusy(true);setMessage('Sage is following a new science trail. This can take a few seconds…');try{for(let attempt=0;attempt<3&&!chosen;attempt++){await refill();chosen=queue.current.find(f=>!seen.current.has(f.id))}if(!chosen)setMessage('This batch has no new snippets. Tap Sage to continue to the next batch.')}catch{setMessage('The research source is not responding right now. Try again shortly; your saved surprises are kept.')}finally{setBusy(false)}}
+ if(chosen){setMessage('');seen.current.add(chosen.id);queue.current=queue.current.filter(f=>f.id!==chosen!.id);setFact(chosen);persist();if(queue.current.length<3)void refill().catch(()=>{})}
+ clicking.current=false;
  }
- return <div className={mini?'sage-facts sage-fact-mini':'sage-facts'}><button className="sage-fact-trigger" aria-label="Sage: tell me a new fun fact" aria-expanded={Boolean(fact)} disabled={busy} onClick={next}><img className={mini?'sage-mini':'sage-scientist'} src="/sage-lamb.png" alt="Sage, a fluffy lamb scientist holding a research board and magnifying glass" width={mini?70:1254} height={mini?70:1254}/></button>{!mini&&<p className="small">{busy?'Finding a fresh science surprise…':'Tap Sage for a little science surprise ✳'}</p>}{fact&&<div className="fact-popup" aria-live="polite"><p className="eyebrow">{fact.kind||"SAGE’S LITTLE SCIENCE SURPRISE"}</p><p>{fact.text}</p>{fact.quote&&<><blockquote>{fact.quote}</blockquote><p className="small">Excerpt from the study’s conclusion · {fact.year}. One study is not the whole evidence picture.</p></>}<a href={fact.url} target="_blank" rel="noopener noreferrer">Follow the source ↗</a><button className="quiet" disabled={busy} onClick={next}>{busy?'Finding something new…':'Another fact'}</button><button className="quiet" onClick={()=>setFact(null)} aria-label="Close fun fact">Close</button></div>}{message&&<p className="small" role="status">{message}</p>}</div>;
+ return <div className={mini?'sage-facts sage-fact-mini':'sage-facts'}><button className="sage-fact-trigger" aria-label="Sage: tell me a new fun fact" aria-expanded={Boolean(fact)} disabled={busy} onClick={next}><img className={mini?'sage-mini':'sage-scientist'} src="/sage-lamb.png" alt="Sage, a fluffy lamb scientist holding a research board and magnifying glass" width={mini?70:1254} height={mini?70:1254}/></button>{!mini&&<p className="small">{busy?'Finding a fresh science surprise…':'Tap Sage for a little science surprise ✳'}</p>}{fact&&<div className="fact-popup" aria-live="polite"><p className="eyebrow">{fact.kind||"SAGE’S LITTLE SCIENCE SURPRISE"}</p><p>{fact.text}</p>{fact.quote&&<><blockquote>{fact.quote}</blockquote><p className="small">Excerpt from the study’s abstract · {fact.year}. One study is not the whole evidence picture.</p></>}<a href={fact.url} target="_blank" rel="noopener noreferrer">Follow the source ↗</a><button className="quiet" disabled={busy} onClick={next}>{busy?'Finding something new…':'Another fact'}</button><button className="quiet" onClick={()=>setFact(null)} aria-label="Close fun fact">Close</button></div>}{message&&<p className="small" role="status">{message}</p>}</div>;
 }
